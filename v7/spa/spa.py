@@ -112,9 +112,14 @@ class RenderPages(Task):
                     task['task_dep'] = ['render_posts']
                     yield task
 
-    def compile_json(self, post, path, lang=None):
+    def compile_json(self, path, extractor=None, *args):
+        makedirs(os.path.dirname(path))
         with io.open(path, 'w+', encoding='utf-8') as dest:
-            data = json.dumps(post.as_dict(lang) , indent=2,
+            if callable(extractor) and args:
+                extracted = extractor(*args)
+            else:
+                extracted = extractor
+            data = json.dumps(extracted, indent=2,
                               iso_datetime=True, ensure_ascii=False,
                               encoding='utf-8')
             # TODO: there are some string in py2 after the encoding,

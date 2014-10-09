@@ -75,6 +75,34 @@ def post_as_dict(post, _link, lang=None):
     result['tags'] = tags
     return result
 
+def site_context(site):
+    from nikola.utils import TranslatableSetting, LOGGER, Functionary
+    result = {}
+    translated_settings = {}
+    for l in site.config['TRANSLATIONS']:
+        translated_settings[l] = {}
+    for k,v in site.GLOBAL_CONTEXT.items():
+        if k in ['template_hooks', 'get_post_data', 'timezone']:
+            continue
+        if callable(v):
+            if isinstance(v, TranslatableSetting):
+                for l in site.config['TRANSLATIONS']:
+                    translated_settings[l][k] = v.values[l]
+                continue
+            elif isinstance(v, Functionary):
+                # just a callable dict
+                pass
+            else:
+                LOGGER.warn('Found unserializable callable in GLOBAL_CONTEXT: %r, %s' % (k, type(v)))
+                continue
+
+        result[k] = v
+    result['translated_settings'] = translated_settings
+    # TODO: LEGAL_VALUES isn't exported by nikola.py!
+    # result['lang'] in LEGAL_VALUES['RTL_LANGUAGES']
+    result['is_rtl'] = False
+    result['default_lang'] = site.default_lang
+    return result
 
 class RenderSPA(Task):
     """Render json model"""
@@ -131,6 +159,18 @@ class RenderSPA(Task):
                     'file_dep': post.fragment_deps(lang)
                 }
                 yield task
+        # render globals
+        output_name = os.path.join(base_path, 'globals.json')
+        yield {
+            'name': os.path.normpath(output_name),
+            'targets': [output_name],
+            'actions': [(self.compile_json, [output_name, site_context, self.site])],
+            'clean': True,
+            'uptodate': [config_changed({
+                1: kw
+            })],
+            'basename': self.name
+        }
 
     def compile_json(self, path, extractor=None, *args):
         makedirs(os.path.dirname(path))

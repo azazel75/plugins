@@ -102,20 +102,35 @@ class RenderSPA(Task):
             "translations": self.site.config["TRANSLATIONS"],
         }
 
+        base_path = os.path.join(self.site.config['OUTPUT_FOLDER'], 'json')
+
         self.site.scan_posts()
         yield self.group_task()
+        _link = self.site.link
         for lang in kw["translations"]:
             for post in self.site.timeline:
                 if not kw["show_untranslated_posts"] and not post.is_translation_available(lang):
                     continue
-                for task in self.site.generic_page_renderer(lang, post,
-                                                            kw["filters"]):
-                    task['uptodate'] = [config_changed({
-                        1: task['uptodate'][0].config,
-                        2: kw})]
-                    task['basename'] = self.name
-                    task['task_dep'] = ['render_posts']
-                    yield task
+                extension = self.site.get_compiler(post.source_path).extension()
+                output_name = os.path.join(base_path,
+                                           post.destination_path(lang, extension) +
+                                           '.json')
+                task = {
+                    'name': os.path.normpath(output_name),
+                    'targets': [output_name],
+                    'actions': [(self.compile_json, [output_name, post_as_dict,
+                                                     post, _link, lang])],
+                    'clean': True,
+                    'uptodate': [config_changed({
+                        1: post.text(lang),
+                        2: post.title(lang),
+                        3: kw
+                    })],
+                    'task_dep': ['render_posts'],
+                    'basename': self.name,
+                    'file_dep': post.fragment_deps(lang)
+                }
+                yield task
 
     def compile_json(self, path, extractor=None, *args):
         makedirs(os.path.dirname(path))

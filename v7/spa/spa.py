@@ -13,30 +13,66 @@ import nssjson as json
 import io
 
 def post_as_dict(self, post, lang=None):
+def _id(post, lang):
+    return post.permalink(lang) + '.json'
+
+def post_as_dict(post, _link, lang=None):
     if lang is None:
         lang = LocaleBorg().current_lang
+
     result = {
-        'meta': post.meta[lang],
-        'translated_to': list(post.translated_to),
+        'abs_permalink': post.permalink(absolute=True),
+        'author': post.author(lang), # it has a fallback
+        'date': post.date,
+        'formatted_date': post.formatted_date(
+            post.config.get(
+            'DATE_FORMAT', '%Y-%m-%d %H:%M')),
+        'id': _id(post, lang),
+        'id_comments': post._base_path,
         'is_draft': post.is_draft,
+        'is_mathjax': post.is_mathjax,
         'is_private': post.is_private,
-        'use_in_feeds': post.use_in_feeds,
-        'tags': post._tags[lang],
+        'iso_date': post.date.isoformat(),
+        'meta': post.meta[lang],
+        'permalink': post.permalink(lang),
+        'sourcelink': post.source_link(lang),
+        'template_name': post.template_name,
         'text': post.text(lang),
         'text_stripped': post.text(strip_html=True),
         'text_teaser': None,
-        'id': post.permalink() + '.json',
-        'template_name': post.template_name,
-        'date': post.date,
-        'date_formatted': post.date.strftime(
-            post.config.GLOBAL_CONTEXT['date_format'])
+        'use_in_feeds': post.use_in_feeds,
     }
     if post.config['INDEX_TEASERS']:
         result['text_teaser'] = post.text(teaser_only=True)
-    translated_ids = {}
-    for l in result['translated_to']:
-        translated_ids[l] = post.permalink(lang=l) + '.json'
-    result['translated_ids'] = translated_ids
+    translated_to = []
+    for t in post.translations.keys():
+        if t != lang and post.is_translation_available(t):
+            link = post.permalink(lang=t)
+            translated_to.append({
+                'lang': t,
+                'permalink': link,
+                'id': link + '.json'
+            })
+    result['translated_to'] = translated_to
+    for key in ('prev_post', 'next_post'):
+        p = getattr(post, key, None)
+        if p:
+            result[key] = {
+                'title': p.title(lang),
+                'permalink': p.permalink(lang),
+                'id': _id(post, lang)
+            }
+        else:
+            result[key] = None
+    if post.use_in_feeds:
+        result['enable_comments'] = True
+    else:
+        result['enable_comments'] = post.config['COMMENTS_IN_STORIES']
+    tags = []
+    for t in  post._tags[lang]:
+        link = _link('tag', t, lang)
+        tags.append({'name': t, 'link': link, 'id': link + '.json'})
+    result['tags'] = tags
     return result
 
 

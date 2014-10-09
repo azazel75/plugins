@@ -76,7 +76,7 @@ def post_as_dict(post, _link, lang=None):
     return result
 
 
-class RenderPages(Task):
+class RenderSPA(Task):
     """Render json model"""
 
     name = "render_spa"

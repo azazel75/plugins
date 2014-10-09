@@ -89,17 +89,17 @@ class RenderSPA(Task):
     def gen_tasks(self):
         """Build final pages from metadata and HTML fragments."""
         kw = {
-            "post_pages": self.site.config["post_pages"],
-            "translations": self.site.config["TRANSLATIONS"],
-            "filters": self.site.config["FILTERS"],
-            "show_untranslated_posts": self.site.config['SHOW_UNTRANSLATED_POSTS'],
-            "demote_headers": self.site.config['DEMOTE_HEADERS'],
-            "index_display_post_count": self.site.config['INDEX_DISPLAY_POST_COUNT'],
-            "messages": self.site.MESSAGES,
-            "index_teasers": self.site.config['INDEX_TEASERS'],
-            "output_folder": self.site.config['OUTPUT_FOLDER'],
             "blog_title": self.site.config['BLOG_TITLE'],
             "content_footer": self.site.config['CONTENT_FOOTER'],
+            "demote_headers": self.site.config['DEMOTE_HEADERS'],
+            "filters": self.site.config["FILTERS"],
+            "index_display_post_count": self.site.config['INDEX_DISPLAY_POST_COUNT'],
+            "index_teasers": self.site.config['INDEX_TEASERS'],
+            "messages": self.site.MESSAGES,
+            "output_folder": self.site.config['OUTPUT_FOLDER'],
+            "post_pages": self.site.config["post_pages"],
+            "show_untranslated_posts": self.site.config['SHOW_UNTRANSLATED_POSTS'],
+            "translations": self.site.config["TRANSLATIONS"],
         }
 
         self.site.scan_posts()

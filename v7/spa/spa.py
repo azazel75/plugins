@@ -12,7 +12,6 @@ from nikola.utils import config_changed, LocaleBorg
 import nssjson as json
 import io
 
-def post_as_dict(self, post, lang=None):
 def _id(post, lang):
     return post.permalink(lang) + '.json'
 

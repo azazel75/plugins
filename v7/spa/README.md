@@ -1,0 +1,1 @@
+Turns your blog into a single page application

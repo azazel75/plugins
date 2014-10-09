@@ -1,0 +1,9 @@
+[Core]
+Name = render_spa
+Module = spa
+
+[Documentation]
+Author = Alberto Berti
+Version = 0.1
+Website = http://getnikola.com
+Description = Render the json model for client-side JavaScript

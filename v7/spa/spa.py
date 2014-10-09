@@ -7,10 +7,11 @@
 
 
 from __future__ import unicode_literals
-from nikola.plugin_categories import Task
-from nikola.utils import config_changed, LocaleBorg
-import nssjson as json
 import io
+import os
+from nikola.plugin_categories import Task
+from nikola.utils import config_changed, LocaleBorg, makedirs
+import nssjson as json
 
 def _id(post, lang):
     return post.permalink(lang) + '.json'

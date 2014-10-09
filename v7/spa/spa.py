@@ -81,6 +81,11 @@ class RenderSPA(Task):
 
     name = "render_spa"
 
+
+    def set_site(self, site):
+        super(RenderSPA, self).set_site(site)
+        site.GLOBAL_CONTEXT['get_post_data'] = post_as_dict
+
     def gen_tasks(self):
         """Build final pages from metadata and HTML fragments."""
         kw = {

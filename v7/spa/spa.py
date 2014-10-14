@@ -10,7 +10,7 @@ from __future__ import unicode_literals
 import io
 import os
 from nikola.plugin_categories import Task
-from nikola.utils import config_changed, LocaleBorg, makedirs
+from nikola.utils import config_changed, LocaleBorg, makedirs, copy_file
 import nssjson as json
 
 def _id(post, lang):
@@ -128,9 +128,16 @@ class RenderSPA(Task):
             "post_pages": self.site.config["post_pages"],
             "show_untranslated_posts": self.site.config['SHOW_UNTRANSLATED_POSTS'],
             "translations": self.site.config["TRANSLATIONS"],
+            "views": [
+                'post.partial',
+                'post_meta.partial',
+                'story.partial',
+            ]
         }
 
-        base_path = os.path.join(self.site.config['OUTPUT_FOLDER'], 'json')
+        base_path = os.path.join(self.site.config['OUTPUT_FOLDER'], 'assets')
+        json_base_path = os.path.join(base_path, 'json')
+        view_base_path = os.path.join(base_path, 'view')
 
         self.site.scan_posts()
         yield self.group_task()
@@ -140,7 +147,7 @@ class RenderSPA(Task):
                 if not kw["show_untranslated_posts"] and not post.is_translation_available(lang):
                     continue
                 extension = self.site.get_compiler(post.source_path).extension()
-                output_name = os.path.join(base_path,
+                output_name = os.path.join(json_base_path,
                                            post.destination_path(lang, extension) +
                                            '.json')
                 task = {
@@ -160,7 +167,7 @@ class RenderSPA(Task):
                 }
                 yield task
         # render globals
-        output_name = os.path.join(base_path, 'globals.json')
+        output_name = os.path.join(json_base_path, 'globals.json')
         yield {
             'name': os.path.normpath(output_name),
             'targets': [output_name],
@@ -171,6 +178,23 @@ class RenderSPA(Task):
             })],
             'basename': self.name
         }
+        # copy views
+        template_deps = self.site.template_system.template_deps
+        template_to_copy = set()
+        for view in kw['views']:
+            template_to_copy = template_to_copy.union(template_deps(view))
+
+        for t in template_to_copy:
+            output_name = os.path.join(view_base_path, os.path.basename(t))
+            yield {
+                'name': os.path.normpath(output_name),
+                'targets': [output_name],
+                'actions': [(copy_file, [t, output_name])],
+                'clean': True,
+                'file_dep': [t],
+                'basename': self.name
+            }
+
 
     def compile_json(self, path, extractor=None, *args):
         makedirs(os.path.dirname(path))

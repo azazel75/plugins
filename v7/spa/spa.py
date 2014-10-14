@@ -112,7 +112,7 @@ class RenderSPA(Task):
 
     def set_site(self, site):
         super(RenderSPA, self).set_site(site)
-        site.GLOBAL_CONTEXT['get_post_data'] = post_as_dict
+        site.config['GLOBAL_CONTEXT_FILLER'].append(self.add_spa_data)
 
     def gen_tasks(self):
         """Build final pages from metadata and HTML fragments."""
@@ -185,3 +185,11 @@ class RenderSPA(Task):
             # TODO: there are some string in py2 after the encoding,
             # have find a better way to handle this
             dest.write(data)
+
+    def add_spa_data(self, context, template_name):
+        post = context.get('post')
+        if post and ('post' in template_name or 'story' in template_name):
+            post = post_as_dict(post, context['_link'], context.get('lang'))
+            context['post'] = post
+            context['post_json'] = json.dumps(post, iso_datetime=True, ensure_ascii=False)
+            context['globals_json'] = json.dumps(site_context(self.site), ensure_ascii=False)

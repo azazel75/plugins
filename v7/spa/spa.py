@@ -11,69 +11,12 @@ import io
 import os
 from nikola.plugin_categories import Task
 from nikola.utils import config_changed, LocaleBorg, makedirs, copy_file
+import lxml
 import nssjson as json
 
 def _id(post, lang):
     return post.permalink(lang) + '.json'
 
-def post_as_dict(post, _link, lang=None):
-    if lang is None:
-        lang = LocaleBorg().current_lang
-
-    result = {
-        'abs_permalink': post.permalink(absolute=True),
-        'author': post.author(lang), # it has a fallback
-        'date': post.date,
-        'formatted_date': post.formatted_date(
-            post.config.get(
-            'DATE_FORMAT', '%Y-%m-%d %H:%M')),
-        'id': _id(post, lang),
-        'id_comments': post._base_path,
-        'is_draft': post.is_draft,
-        'is_mathjax': post.is_mathjax,
-        'is_private': post.is_private,
-        'iso_date': post.date.isoformat(),
-        'meta': post.meta[lang],
-        'permalink': post.permalink(lang),
-        'sourcelink': post.source_link(lang),
-        'template_name': post.template_name,
-        'text': post.text(lang),
-        'text_stripped': post.text(strip_html=True),
-        'text_teaser': None,
-        'use_in_feeds': post.use_in_feeds,
-    }
-    if post.config['INDEX_TEASERS']:
-        result['text_teaser'] = post.text(teaser_only=True)
-    translated_to = []
-    for t in post.translations.keys():
-        if t != lang and post.is_translation_available(t):
-            link = post.permalink(lang=t)
-            translated_to.append({
-                'lang': t,
-                'permalink': link,
-                'id': link + '.json'
-            })
-    result['translated_to'] = translated_to
-    for key in ('prev_post', 'next_post'):
-        p = getattr(post, key, None)
-        if p:
-            result[key] = {
-                'title': p.title(lang),
-                'permalink': p.permalink(lang),
-                'id': _id(post, lang)
-            }
-        else:
-            result[key] = None
-    if post.use_in_feeds:
-        result['enable_comments'] = True
-    else:
-        result['enable_comments'] = post.config['COMMENTS_IN_STORIES']
-    tags = []
-    for t in  post._tags[lang]:
-        link = _link('tag', t, lang)
-        tags.append({'name': t, 'link': link, 'id': link + '.json'})
-    result['tags'] = tags
-    return result
 
 def site_context(site):
     from nikola.utils import TranslatableSetting, LOGGER, Functionary
@@ -108,7 +51,6 @@ class RenderSPA(Task):
     """Render json model"""
 
     name = "render_spa"
-
 
     def set_site(self, site):
         super(RenderSPA, self).set_site(site)
@@ -153,7 +95,7 @@ class RenderSPA(Task):
                 task = {
                     'name': os.path.normpath(output_name),
                     'targets': [output_name],
-                    'actions': [(self.compile_json, [output_name, post_as_dict,
+                    'actions': [(self.compile_json, [output_name, self.post_as_dict,
                                                      post, _link, lang])],
                     'clean': True,
                     'uptodate': [config_changed({
@@ -213,7 +155,79 @@ class RenderSPA(Task):
     def add_spa_data(self, context, template_name):
         post = context.get('post')
         if post and ('post' in template_name or 'story' in template_name):
-            post = post_as_dict(post, context['_link'], context.get('lang'))
+            post = self.post_as_dict(post, context['_link'], context.get('lang'))
             context['post'] = post
             context['post_json'] = json.dumps(post, iso_datetime=True, ensure_ascii=False)
             context['globals_json'] = json.dumps(site_context(self.site), ensure_ascii=False)
+
+    def post_as_dict(self, post, _link, lang=None):
+        if lang is None:
+            lang = LocaleBorg().current_lang
+
+        # replace  link:// stuff in the html
+        extension = self.site.get_compiler(post.source_path).extension()
+        url_part = post.destination_path(lang, extension)
+        src = os.sep + url_part
+        src = os.path.normpath(src)
+        src = "/".join(src.split(os.sep))
+        post_text = post.text(lang)
+        frags = lxml.html.fragments_fromstring(post_text)
+        post_text = ''
+        for frag in frags:
+            frag.rewrite_links(lambda dst: self.site.url_replacer(src, dst, lang))
+            post_text += lxml.html.tostring(frag, encoding='unicode', method='html', pretty_print=False)
+
+        result = {
+            'abs_permalink': post.permalink(absolute=True),
+            'author': post.author(lang), # it has a fallback
+            'date': post.date,
+            'formatted_date': post.formatted_date(
+                post.config.get(
+                'DATE_FORMAT', '%Y-%m-%d %H:%M')),
+            'id': _id(post, lang),
+            'id_comments': post._base_path,
+            'is_draft': post.is_draft,
+            'is_mathjax': post.is_mathjax,
+            'is_private': post.is_private,
+            'iso_date': post.date.isoformat(),
+            'meta': post.meta[lang],
+            'permalink': post.permalink(lang),
+            'sourcelink': post.source_link(lang),
+            'template_name': post.template_name,
+            'text': post_text,
+            'text_stripped': post.text(strip_html=True),
+            'text_teaser': None,
+            'use_in_feeds': post.use_in_feeds,
+        }
+        if post.config['INDEX_TEASERS']:
+            result['text_teaser'] = post.text(teaser_only=True)
+        translated_to = []
+        for t in post.translations.keys():
+            if t != lang and post.is_translation_available(t):
+                link = post.permalink(lang=t)
+                translated_to.append({
+                    'lang': t,
+                    'permalink': link,
+                    'id': link + '.json'
+                })
+        result['translated_to'] = translated_to
+        for key in ('prev_post', 'next_post'):
+            p = getattr(post, key, None)
+            if p:
+                result[key] = {
+                    'title': p.title(lang),
+                    'permalink': p.permalink(lang),
+                    'id': _id(post, lang)
+                }
+            else:
+                result[key] = None
+        if post.use_in_feeds:
+            result['enable_comments'] = True
+        else:
+            result['enable_comments'] = post.config['COMMENTS_IN_STORIES']
+        tags = []
+        for t in  post._tags[lang]:
+            link = _link('tag', t, lang)
+            tags.append({'name': t, 'link': link, 'id': link + '.json'})
+        result['tags'] = tags
+        return result

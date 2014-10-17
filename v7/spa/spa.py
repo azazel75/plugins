@@ -55,6 +55,7 @@ class RenderSPA(Task):
     def set_site(self, site):
         super(RenderSPA, self).set_site(site)
         site.config['GLOBAL_CONTEXT_FILLER'].append(self.add_spa_data)
+        self._cache = {}
 
     def gen_tasks(self):
         """Build final pages from metadata and HTML fragments."""
@@ -164,6 +165,9 @@ class RenderSPA(Task):
         if lang is None:
             lang = LocaleBorg().current_lang
 
+        result = self._cache.get((post, lang))
+        if result:
+            return result
         # replace  link:// stuff in the html
         extension = self.site.get_compiler(post.source_path).extension()
         url_part = post.destination_path(lang, extension)
@@ -230,4 +234,5 @@ class RenderSPA(Task):
             link = _link('tag', t, lang)
             tags.append({'name': t, 'link': link, 'id': link + '.json'})
         result['tags'] = tags
+        self._cache[(post, lang)] = result
         return result

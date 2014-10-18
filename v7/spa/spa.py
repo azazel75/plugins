@@ -83,10 +83,23 @@ class RenderSPA(Task):
                                  json_subpath)
         view_base_path = os.path.join(self.site.config['OUTPUT_FOLDER'], 'assets',
                                       'view')
+        client_templates = {
+            'client_templates': {
+                'post.tmpl': {
+                    'view-content': 'post.partial',
+                    'view-meta': 'post_meta.partial'
+                },
+                'story.tmpl': {
+                    'view-content': 'story.partial',
+                    'view-meta': 'post_meta.partial'
+                }
+            }
+        }
 
         self.site.scan_posts()
         yield self.group_task()
         _link = self.site.link
+
         for lang in kw["translations"]:
             for post in self.site.timeline:
                 if not kw["show_untranslated_posts"] and not post.is_translation_available(lang):
@@ -99,7 +112,8 @@ class RenderSPA(Task):
                     'name': os.path.normpath(output_name),
                     'targets': [output_name],
                     'actions': [(self.compile_json, [output_name, self.post_as_dict,
-                                                     post, _link, lang])],
+                                                     post, _link, lang,
+                                                     client_templates])],
                     'clean': True,
                     'uptodate': [config_changed({
                         1: post.text(lang),
@@ -175,6 +189,12 @@ class RenderSPA(Task):
                               for post in context['posts']]
                 context['posts'] = post_dicts
                 context['template_name'] = 'list.tmpl'
+                context['client_templates'] = {
+                    'list.tmpl': {
+                        'view-content': 'list.partial',
+                        'view-meta': None
+                    }
+                }
                 task['actions'] = [(self.compile_json, [output_name, context])]
                 yield task
 
@@ -200,7 +220,7 @@ class RenderSPA(Task):
             context['post_json'] = json.dumps(post, iso_datetime=True, ensure_ascii=False)
             context['globals_json'] = json.dumps(site_context(self.site), ensure_ascii=False)
 
-    def post_as_dict(self, post, _link, lang=None):
+    def post_as_dict(self, post, _link, lang=None, additional_data=None):
         if lang is None:
             lang = LocaleBorg().current_lang
 
@@ -274,4 +294,6 @@ class RenderSPA(Task):
             tags.append({'name': t, 'link': link, 'id': link + '.json'})
         result['tags'] = tags
         self._cache[(post, lang)] = result
+        if additional_data and isinstance(additional_data, dict):
+            result.update(additional_data)
         return result

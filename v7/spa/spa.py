@@ -170,7 +170,7 @@ class RenderSPA(Task):
             out_target_parts.insert(1, json_subpath)
             out_target_parts[-1] += '.json'
             output_name = os.path.join(*out_target_parts)
-            yield output_name, in_task, {
+            yield plugin, in_task, output_name, {
                 'name': os.path.normpath(output_name),
                 'targets': [output_name],
                 'clean': True,
@@ -180,10 +180,9 @@ class RenderSPA(Task):
 
     def list_template_tasks(self, json_subpath):
         "Tasks which use the list.tmpl for render"
-        # indexes
-        for plugin in ('render_indexes', 'render_archive'):
-            for output_name, in_task, task in \
-                self._gen_dependent_json_tasks(plugin, json_subpath):
+        for plugin_name in ('render_indexes', 'render_archive'):
+            for plugin, in_task, output_name, task in \
+                self._gen_dependent_json_tasks(plugin_name, json_subpath):
                 context = in_task['actions'][0][1][2]
                 post_dicts = [self.post_as_dict(post, self.site.link,
                                                 context['lang'])\

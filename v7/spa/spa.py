@@ -24,7 +24,7 @@ def site_context(site):
     translated_settings = {}
     for l in site.config['TRANSLATIONS']:
         translated_settings[l] = {}
-    for k,v in site.GLOBAL_CONTEXT.items():
+    for k, v in site.GLOBAL_CONTEXT.items():
         if k in ['template_hooks', 'get_post_data', 'timezone']:
             continue
         if callable(v):

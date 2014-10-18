@@ -78,9 +78,11 @@ class RenderSPA(Task):
             ]
         }
 
-        base_path = os.path.join(self.site.config['OUTPUT_FOLDER'], 'assets')
-        json_base_path = os.path.join(base_path, 'json')
-        view_base_path = os.path.join(base_path, 'view')
+        json_subpath = os.path.join('assets', 'json')
+        json_base_path = os.path.join(self.site.config['OUTPUT_FOLDER'],
+                                 json_subpath)
+        view_base_path = os.path.join(self.site.config['OUTPUT_FOLDER'], 'assets',
+                                      'view')
 
         self.site.scan_posts()
         yield self.group_task()
@@ -137,7 +139,44 @@ class RenderSPA(Task):
                 'file_dep': [t],
                 'basename': self.name
             }
+        for task in self.list_template_tasks(json_subpath):
+            yield task
 
+    def _gen_dependent_json_tasks(self, task_name, json_subpath):
+        plugin = self.site.plugin_manager.getPluginByName(task_name, 'Task')\
+                 .plugin_object
+        gen =  plugin.gen_tasks()
+        # ignore first item which is a group_task
+        gen.next()
+        from doit.tools import set_trace; set_trace()
+        for in_task in gen:
+            file_dep = in_task['targets'][0]
+            out_target_parts = file_dep.split(os.sep)
+            out_target_parts.insert(1, json_subpath)
+            out_target_parts[-1] += '.json'
+            output_name = os.path.join(*out_target_parts)
+            yield output_name, in_task, {
+                'name': os.path.normpath(output_name),
+                'targets': [output_name],
+                'clean': True,
+                'file_dep': [file_dep],
+                'basename': self.name
+            }
+
+    def list_template_tasks(self, json_subpath):
+        "Tasks which use the list.tmpl for render"
+        # indexes
+        for plugin in ('render_indexes', 'render_archive'):
+            for output_name, in_task, task in \
+                self._gen_dependent_json_tasks(plugin, json_subpath):
+                context = in_task['actions'][0][1][2]
+                post_dicts = [self.post_as_dict(post, self.site.link,
+                                                context['lang'])\
+                              for post in context['posts']]
+                context['posts'] = post_dicts
+                context['template_name'] = 'list.tmpl'
+                task['actions'] = [(self.compile_json, [output_name, context])]
+                yield task
 
     def compile_json(self, path, extractor=None, *args):
         makedirs(os.path.dirname(path))

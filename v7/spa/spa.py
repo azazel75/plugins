@@ -156,14 +156,15 @@ class RenderSPA(Task):
         for task in self.list_template_tasks(json_subpath):
             yield task
 
-    def _gen_dependent_json_tasks(self, task_name, json_subpath):
+    def _gen_dependent_json_tasks(self, task_name, json_subpath, check_fn=None):
         plugin = self.site.plugin_manager.getPluginByName(task_name, 'Task')\
                  .plugin_object
         gen =  plugin.gen_tasks()
         # ignore first item which is a group_task
         gen.next()
-        from doit.tools import set_trace; set_trace()
         for in_task in gen:
+            if check_fn and not check_fn(plugin, in_task):
+                continue
             file_dep = in_task['targets'][0]
             out_target_parts = file_dep.split(os.sep)
             out_target_parts.insert(1, json_subpath)

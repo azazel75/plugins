@@ -205,8 +205,7 @@ class RenderSPA(Task):
                 extracted = extractor(*args)
             else:
                 extracted = extractor
-            data = json.dumps(extracted, indent=2,
-                              iso_datetime=True, ensure_ascii=False,
+            data = json.dumps(extracted, iso_datetime=True, ensure_ascii=False,
                               encoding='utf-8')
             # TODO: there are some string in py2 after the encoding,
             # have find a better way to handle this

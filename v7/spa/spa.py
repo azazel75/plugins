@@ -75,6 +75,10 @@ class RenderSPA(Task):
                 'post.partial',
                 'post_meta.partial',
                 'story.partial',
+                'gallery.partial',
+                'gallery_meta.partial',
+                'gallery_extra_js.partial',
+                'list.partial'
             ]
         }
 
@@ -155,6 +159,8 @@ class RenderSPA(Task):
             }
         for task in self.list_template_tasks(json_subpath):
             yield task
+        for task in self.gallery_template_tasks(json_subpath):
+            yield task
 
     def _gen_dependent_json_tasks(self, task_name, json_subpath, check_fn=None):
         plugin = self.site.plugin_manager.getPluginByName(task_name, 'Task')\
@@ -197,6 +203,34 @@ class RenderSPA(Task):
                 }
                 task['actions'] = [(self.compile_json, [output_name, context])]
                 yield task
+
+    def gallery_template_tasks(self, json_subpath):
+        "Tasks which use gallery.tmpl for render"
+        def is_valid_task(plugin, task):
+            # it's strange, 'action is plugin.render_gallery_index' is False
+            # here... maybe something with yapsy?
+            action = task['actions'][0][0]
+            return hasattr(action, 'im_func') and action.im_func \
+                is plugin.render_gallery_index.im_func
+
+        for plugin, in_task, output_name, task in \
+                self._gen_dependent_json_tasks('render_galleries',
+                                               json_subpath,
+                                               is_valid_task):
+            context = in_task['actions'][0][1][2]
+            context['template_name'] = 'gallery.tmpl'
+            context['client_templates'] = {
+                'list.tmpl': {
+                    'view-content': 'gallery.partial',
+                    'view-meta': 'gallery_meta.partial',
+                    'view-extrajs': 'gallery_extra_js.partial'
+                }
+            }
+            post = context['post']
+            if post:
+                context['post'] = self.post_as_dict(post, self.site.link, context['lang'])
+            task['actions'] = [(self.compile_json, [output_name, context])]
+            yield task
 
     def compile_json(self, path, extractor=None, *args):
         makedirs(os.path.dirname(path))

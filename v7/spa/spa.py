@@ -18,35 +18,6 @@ def _id(post, lang):
     return post.permalink(lang) + '.json'
 
 
-def site_context(site):
-    from nikola.utils import TranslatableSetting, LOGGER, Functionary
-    result = {}
-    translated_settings = {}
-    for l in site.config['TRANSLATIONS']:
-        translated_settings[l] = {}
-    for k, v in site.GLOBAL_CONTEXT.items():
-        if k in ['template_hooks', 'get_post_data', 'timezone']:
-            continue
-        if callable(v):
-            if isinstance(v, TranslatableSetting):
-                for l in site.config['TRANSLATIONS']:
-                    translated_settings[l][k] = v.values[l]
-                continue
-            elif isinstance(v, Functionary):
-                # just a callable dict
-                pass
-            else:
-                LOGGER.warn('Found unserializable callable in GLOBAL_CONTEXT: %r, %s' % (k, type(v)))
-                continue
-
-        result[k] = v
-    result['translated_settings'] = translated_settings
-    # TODO: LEGAL_VALUES isn't exported by nikola.py!
-    # result['lang'] in LEGAL_VALUES['RTL_LANGUAGES']
-    result['is_rtl'] = False
-    result['default_lang'] = site.default_lang
-    return result
-
 class RenderSPA(Task):
     """Render json model"""
 
@@ -54,8 +25,15 @@ class RenderSPA(Task):
 
     def set_site(self, site):
         super(RenderSPA, self).set_site(site)
-        site.config['GLOBAL_CONTEXT_FILLER'].append(self.add_spa_data)
+        site.config['GLOBAL_CONTEXT_FILLER'].append(self.fill_context_spa)
         self._cache = {}
+        self._context_fill_config = {
+            'gallery.tmpl': self._fill_gallery_context,
+            'index.tmpl': self._fill_index_context,
+            'list.tmpl': self._fill_list_context,
+            'post.tmpl': self._fill_post_context,
+            'story.tmpl': self._fill_post_context,
+        }
 
     def gen_tasks(self):
         """Build final pages from metadata and HTML fragments."""
@@ -78,8 +56,42 @@ class RenderSPA(Task):
                 'gallery.partial',
                 'gallery_meta.partial',
                 'gallery_extra_js.partial',
+                'index.partial',
                 'list.partial'
-            ]
+            ],
+            'client_templates': {
+                'gallery.tmpl': {
+                    'view-content': 'gallery.partial',
+                    'view-extrajs': 'gallery_extra_js.partial',
+                    'view-meta': 'gallery_meta.partial',
+                    'view-sourcelink': None
+                },
+                'index.tmpl': {
+                    'view-content': 'index.partial',
+                    'view-extrajs': None,
+                    'view-meta': None,
+                    'view-sourcelink': None
+                },
+                'list.tmpl': {
+                    'view-content': 'list.partial',
+                    'view-extrajs': None,
+                    'view-meta': None,
+                    'view-sourcelink': None
+                },
+                'post.tmpl': {
+                    'view-content': 'post.partial',
+                    'view-extrajs': None,
+                    'view-meta': 'post_meta.partial',
+                    'view-sourcelink': 'post_sourcelink.partial'
+                },
+                'story.tmpl': {
+                    'view-content': 'story.partial',
+                    'view-extrajs': None,
+                    'view-meta': 'post_meta.partial',
+                    'view-sourcelink': 'post_sourcelink.partial'
+                },
+            }
+
         }
 
         json_subpath = os.path.join('assets', 'json')
@@ -87,54 +99,17 @@ class RenderSPA(Task):
                                  json_subpath)
         view_base_path = os.path.join(self.site.config['OUTPUT_FOLDER'], 'assets',
                                       'view')
-        client_templates = {
-            'client_templates': {
-                'post.tmpl': {
-                    'view-content': 'post.partial',
-                    'view-meta': 'post_meta.partial'
-                },
-                'story.tmpl': {
-                    'view-content': 'story.partial',
-                    'view-meta': 'post_meta.partial'
-                }
-            }
-        }
 
         self.site.scan_posts()
         yield self.group_task()
-        _link = self.site.link
 
-        for lang in kw["translations"]:
-            for post in self.site.timeline:
-                if not kw["show_untranslated_posts"] and not post.is_translation_available(lang):
-                    continue
-                extension = self.site.get_compiler(post.source_path).extension()
-                output_name = os.path.join(json_base_path,
-                                           post.destination_path(lang, extension) +
-                                           '.json')
-                task = {
-                    'name': os.path.normpath(output_name),
-                    'targets': [output_name],
-                    'actions': [(self.compile_json, [output_name, self.post_as_dict,
-                                                     post, _link, lang,
-                                                     client_templates])],
-                    'clean': True,
-                    'uptodate': [config_changed({
-                        1: post.text(lang),
-                        2: post.title(lang),
-                        3: kw
-                    })],
-                    'task_dep': ['render_posts'],
-                    'basename': self.name,
-                    'file_dep': post.fragment_deps(lang)
-                }
-                yield task
         # render globals
         output_name = os.path.join(json_base_path, 'globals.json')
         yield {
             'name': os.path.normpath(output_name),
             'targets': [output_name],
-            'actions': [(self.compile_json, [output_name, site_context, self.site])],
+            'actions': [(self.compile_json, [output_name, self.site_context,
+                                             self.site, kw['client_templates']])],
             'clean': True,
             'uptodate': [config_changed({
                 1: kw
@@ -161,10 +136,15 @@ class RenderSPA(Task):
             yield task
         for task in self.gallery_template_tasks(json_subpath):
             yield task
+        for task in self.post_story_template_tasks(json_subpath):
+            yield task
+        for task in self.index_template_tasks(json_subpath):
+            yield task
 
     def _gen_dependent_json_tasks(self, task_name, json_subpath, check_fn=None):
         plugin = self.site.plugin_manager.getPluginByName(task_name, 'Task')\
                  .plugin_object
+        output_folder_parts = self.site.config['OUTPUT_FOLDER'].split(os.sep)
         gen =  plugin.gen_tasks()
         # ignore first item which is a group_task
         gen.next()
@@ -173,10 +153,14 @@ class RenderSPA(Task):
                 continue
             file_dep = in_task['targets'][0]
             out_target_parts = file_dep.split(os.sep)
-            out_target_parts.insert(1, json_subpath)
             out_target_parts[-1] += '.json'
+            # assume that output name has been joined to OUTPUT_FOLDER
+            id_parts = out_target_parts[len(output_folder_parts):]
+            id = os.path.join(*id_parts)
+            out_target_parts.insert(len(output_folder_parts), json_subpath)
             output_name = os.path.join(*out_target_parts)
-            yield plugin, in_task, output_name, {
+
+            yield plugin, in_task, output_name, id, {
                 'name': os.path.normpath(output_name),
                 'targets': [output_name],
                 'clean': True,
@@ -184,25 +168,31 @@ class RenderSPA(Task):
                 'basename': self.name
             }
 
+    def _fill_list_context(self, context, id=None):
+        post_dicts = [self.post_as_dict(post, context['lang'])\
+                      for post in context['posts']]
+        context['posts'] = post_dicts
+        context['template_name'] = 'list.tmpl'
+        if id:
+            context['id'] = id
+
     def list_template_tasks(self, json_subpath):
         "Tasks which use the list.tmpl for render"
-        for plugin_name in ('render_indexes', 'render_archive'):
-            for plugin, in_task, output_name, task in \
-                self._gen_dependent_json_tasks(plugin_name, json_subpath):
-                context = in_task['actions'][0][1][2]
-                post_dicts = [self.post_as_dict(post, self.site.link,
-                                                context['lang'])\
-                              for post in context['posts']]
-                context['posts'] = post_dicts
-                context['template_name'] = 'list.tmpl'
-                context['client_templates'] = {
-                    'list.tmpl': {
-                        'view-content': 'list.partial',
-                        'view-meta': None
-                    }
-                }
-                task['actions'] = [(self.compile_json, [output_name, context])]
-                yield task
+        for plugin, in_task, output_name, id, task in \
+            self._gen_dependent_json_tasks('render_archive', json_subpath):
+            context = in_task['actions'][0][1][2]
+            task['actions'] = [(self.compile_json, [output_name, context])]
+            self._fill_list_context(context, id)
+            yield task
+
+    def _fill_gallery_context(self, context, id=None):
+        context['template_name'] = 'gallery.tmpl'
+        post = context['post']
+        if post:
+            context['post'] = self.post_as_dict(post, context['lang'])
+        if id:
+            context['id'] = id
+
 
     def gallery_template_tasks(self, json_subpath):
         "Tasks which use gallery.tmpl for render"
@@ -213,23 +203,52 @@ class RenderSPA(Task):
             return hasattr(action, 'im_func') and action.im_func \
                 is plugin.render_gallery_index.im_func
 
-        for plugin, in_task, output_name, task in \
+        for plugin, in_task, output_name, id, task in \
                 self._gen_dependent_json_tasks('render_galleries',
                                                json_subpath,
                                                is_valid_task):
             context = in_task['actions'][0][1][2]
-            context['template_name'] = 'gallery.tmpl'
-            context['client_templates'] = {
-                'list.tmpl': {
-                    'view-content': 'gallery.partial',
-                    'view-meta': 'gallery_meta.partial',
-                    'view-extrajs': 'gallery_extra_js.partial'
-                }
-            }
-            post = context['post']
-            if post:
-                context['post'] = self.post_as_dict(post, self.site.link, context['lang'])
+            self._fill_gallery_context(context, id)
             task['actions'] = [(self.compile_json, [output_name, context])]
+            yield task
+
+
+    def _fill_post_context(self, context, id=None):
+        post = context['post']
+        lang = context['lang']
+        context.update({
+            'post': self.post_as_dict(post, lang),
+            'template_name': post.template_name
+        })
+        if id:
+            context['id'] = id
+
+    def post_story_template_tasks(self, json_subpath):
+        "Task which use post.tmpl or story.tmpl"
+        for plugin, in_task, output_name, id, task in \
+                self._gen_dependent_json_tasks('render_pages',
+                                               json_subpath):
+            context = in_task['actions'][0][1][2]
+            self._fill_post_context(context, id)
+            task['actions'] = [(self.compile_json, [output_name, context])]
+            yield task
+
+    def _fill_index_context(self, context, id=None):
+        post_dicts = [self.post_as_dict(post, context['lang'])\
+                      for post in context['posts']]
+        context['posts'] = post_dicts
+        context['template_name'] = 'index.tmpl'
+        context['is_mathjax'] = any(p['is_mathjax'] for p in context['posts'])
+        if id:
+            context['id'] = id
+
+    def index_template_tasks(self, json_subpath):
+        "Tasks which use the index.tmpl for render"
+        for plugin, in_task, output_name, id, task in \
+            self._gen_dependent_json_tasks('render_indexes', json_subpath):
+            context = in_task['actions'][0][1][2]
+            task['actions'] = [(self.compile_json, [output_name, context])]
+            self._fill_index_context(context, id)
             yield task
 
     def compile_json(self, path, extractor=None, *args):
@@ -245,15 +264,23 @@ class RenderSPA(Task):
             # have find a better way to handle this
             dest.write(data)
 
-    def add_spa_data(self, context, template_name):
-        post = context.get('post')
-        if post and ('post' in template_name or 'story' in template_name):
-            post = self.post_as_dict(post, context['_link'], context.get('lang'))
-            context['post'] = post
-            context['post_json'] = json.dumps(post, iso_datetime=True, ensure_ascii=False)
-            context['globals_json'] = json.dumps(site_context(self.site), ensure_ascii=False)
+    def fill_context_spa(self, context, template_name):
+        if template_name in self._context_fill_config:
+            self._context_fill_config[template_name](context)
 
-    def post_as_dict(self, post, _link, lang=None, additional_data=None):
+    def post_template_data(self, post, lang=None, additional_data=None):
+        result = {
+            'id': _id(post, lang),
+            'lang': lang,
+            'post': self.post_as_dict(self, post, lang),
+            'template_name': post.template_name
+        }
+
+        if additional_data and isinstance(additional_data, dict):
+            result.update(additional_data)
+        return result
+
+    def post_as_dict(self, post, lang=None):
         if lang is None:
             lang = LocaleBorg().current_lang
 
@@ -280,7 +307,6 @@ class RenderSPA(Task):
             'formatted_date': post.formatted_date(
                 post.config.get(
                 'DATE_FORMAT', '%Y-%m-%d %H:%M')),
-            'id': _id(post, lang),
             'id_comments': post._base_path,
             'is_draft': post.is_draft,
             'is_mathjax': post.is_mathjax,
@@ -289,7 +315,6 @@ class RenderSPA(Task):
             'meta': post.meta[lang],
             'permalink': post.permalink(lang),
             'sourcelink': post.source_link(lang),
-            'template_name': post.template_name,
             'text': post_text,
             'text_stripped': post.text(strip_html=True),
             'text_teaser': None,
@@ -323,10 +348,39 @@ class RenderSPA(Task):
             result['enable_comments'] = post.config['COMMENTS_IN_STORIES']
         tags = []
         for t in  post._tags[lang]:
-            link = _link('tag', t, lang)
+            link = self.site.link('tag', t, lang)
             tags.append({'name': t, 'link': link, 'id': link + '.json'})
         result['tags'] = tags
         self._cache[(post, lang)] = result
-        if additional_data and isinstance(additional_data, dict):
-            result.update(additional_data)
+        return result
+
+    def site_context(self, site, client_templates):
+        from nikola.utils import TranslatableSetting, LOGGER, Functionary
+        result = {}
+        translated_settings = {}
+        for l in site.config['TRANSLATIONS']:
+            translated_settings[l] = {}
+        for k, v in site.GLOBAL_CONTEXT.items():
+            if k in ['template_hooks', 'get_post_data', 'timezone']:
+                continue
+            if callable(v):
+                if isinstance(v, TranslatableSetting):
+                    for l in site.config['TRANSLATIONS']:
+                        translated_settings[l][k] = v.values[l]
+                    continue
+                elif isinstance(v, Functionary):
+                    # just a callable dict
+                    pass
+                else:
+                    LOGGER.warn('Found unserializable callable in GLOBAL_CONTEXT: %r, %s' % (k, type(v)))
+                    continue
+
+            result[k] = v
+        result['translated_settings'] = translated_settings
+        # TODO: LEGAL_VALUES isn't exported by nikola.py!
+        # result['lang'] in LEGAL_VALUES['RTL_LANGUAGES']
+        result['is_rtl'] = False
+        result['default_lang'] = site.default_lang
+        result['BASE_URL'] = site.config['BASE_URL']
+        result['client_templates'] = client_templates
         return result

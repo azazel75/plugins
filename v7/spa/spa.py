@@ -17,6 +17,45 @@ import nssjson as json
 def _id(post, lang):
     return post.permalink(lang) + '.json'
 
+_image_size_cache = {}
+
+def _calc_photo_data(img_list, img_titles, thumbs, output_name):
+    """Unfortunately I had to copy here some code from galleries.py, there
+    is no way to access it where it is."""
+    Image = None
+    try:
+        from PIL import Image # NOQA
+    except ImportError:
+        try:
+            import Image as _Image
+            Image = _Image
+        except ImportError:
+            pass
+
+    def url_from_path(p):
+        url = '/'.join(os.path.relpath(p,
+                                       os.path.dirname(output_name) + os.sep).split(os.sep))
+        return url
+
+    photo_array = []
+    for img, thumb, title in zip(img_list, thumbs, img_titles):
+        w, h = _image_size_cache.get(thumb, (None, None))
+        if w is None:
+            im = Image.open(thumb)
+            w, h = im.size
+            _image_size_cache[thumb] = w, h
+        # Thumbs are files in output, we need URLs
+        photo_array.append({
+            'url': url_from_path(img),
+            'url_thumb': url_from_path(thumb),
+            'title': title,
+            'size': {
+                'w': w,
+                'h': h
+            },
+        })
+    return photo_array
+
 
 class RenderSPA(Task):
     """Render json model"""
@@ -37,7 +76,7 @@ class RenderSPA(Task):
 
     def gen_tasks(self):
         """Build final pages from metadata and HTML fragments."""
-        kw = {
+        self.kw = kw = {
             "blog_title": self.site.config['BLOG_TITLE'],
             "content_footer": self.site.config['CONTENT_FOOTER'],
             "demote_headers": self.site.config['DEMOTE_HEADERS'],
@@ -48,6 +87,7 @@ class RenderSPA(Task):
             "output_folder": self.site.config['OUTPUT_FOLDER'],
             "post_pages": self.site.config["post_pages"],
             "show_untranslated_posts": self.site.config['SHOW_UNTRANSLATED_POSTS'],
+            'thumbnail_size': self.site.config['THUMBNAIL_SIZE'],
             "translations": self.site.config["TRANSLATIONS"],
             "views": [
                 'post.partial',
@@ -192,7 +232,7 @@ class RenderSPA(Task):
             context['post'] = self.post_as_dict(post, context['lang'])
         if id:
             context['id'] = id
-
+        context["thumbnail_size"] = self.kw["thumbnail_size"]
 
     def gallery_template_tasks(self, json_subpath):
         "Tasks which use gallery.tmpl for render"
@@ -208,10 +248,22 @@ class RenderSPA(Task):
                                                json_subpath,
                                                is_valid_task):
             context = in_task['actions'][0][1][2]
+            img_list = in_task['actions'][0][1][3]
+            img_titles = in_task['actions'][0][1][4]
+            thumbs = in_task['actions'][0][1][5]
+
             self._fill_gallery_context(context, id)
-            task['actions'] = [(self.compile_json, [output_name, context])]
+            task['actions'] = [(self.compile_gallery_json,
+                                [output_name, context, img_list, img_titles, thumbs])]
+            task['file_dep'] += thumbs
             yield task
 
+    def compile_gallery_json(self, path, data, img_list, img_titles, thumbs):
+        """This needs to get width and height from the real thumbs files, so
+        it can't be run at task generation time."""
+        data['photo_array'] = _calc_photo_data(img_list, img_titles, thumbs, path)
+        data['photo_array_json'] = json.dumps(data['photo_array'])
+        self.compile_json(path, data)
 
     def _fill_post_context(self, context, id=None):
         post = context['post']
